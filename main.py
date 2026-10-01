@@ -7,7 +7,7 @@ import yt_dlp
 
 app = FastAPI(title="AudioSetter YouTube Engine")
 
-DOWNLOAD_DIR = "downloads"
+DOWNLOAD_DIR = "/tmp/downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
@@ -24,7 +24,6 @@ def extract_audio(req: FetchRequest):
   file_id = str(uuid.uuid4())[:8]
   output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
 
-  # yt-dlp doğrudan sesi sunucuya indirir (YouTube bot engellerine takılmaz)
   ydl_opts = {
       "format": "bestaudio[ext=m4a]/bestaudio/best",
       "outtmpl": output_template,
@@ -40,10 +39,9 @@ def extract_audio(req: FetchRequest):
       ext = info.get("ext", "m4a")
       final_filename = f"{file_id}.{ext}"
 
-      # Dosyanın gerçekten indiğini teyit ediyoruz
+      # Dosya kontrolü
       file_path = os.path.join(DOWNLOAD_DIR, final_filename)
       if not os.path.exists(file_path):
-        # Farklı bir uzantıyla indiyse klasörde ara
         for f in os.listdir(DOWNLOAD_DIR):
           if f.startswith(file_id):
             final_filename = f
@@ -76,4 +74,5 @@ def health_check():
 if __name__ == "__main__":
   import uvicorn
 
-  uvicorn.run(app, host="0.0.0.0", port=8000)
+  port = int(os.environ.get("PORT", 8000))
+  uvicorn.run(app, host="0.0.0.0", port=port)
