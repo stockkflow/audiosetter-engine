@@ -24,28 +24,43 @@ def extract_audio(req: FetchRequest):
   file_id = str(uuid.uuid4())[:8]
   output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
 
+  # Hata veren player_skip kaldırıldı, en uyumlu mweb ve android istemcileri tanımlandı
   ydl_opts = {
-      "format": "bestaudio[ext=m4a]/bestaudio/best",
+      "format": "bestaudio/best",
       "outtmpl": output_template,
       "quiet": True,
       "no_warnings": True,
       "nocheckcertificate": True,
+      "extractor_args": {
+          "youtube": {
+              "player_client": ["mweb", "android"],
+          }
+      },
+      "http_headers": {
+          "User-Agent": (
+              "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML,"
+              " like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+          ),
+          "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+      },
   }
 
   try:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
       info = ydl.extract_info(url, download=True)
       title = info.get("title", "AudioSetter Track")
-      ext = info.get("ext", "m4a")
-      final_filename = f"{file_id}.{ext}"
 
-      # Dosya kontrolü
-      file_path = os.path.join(DOWNLOAD_DIR, final_filename)
-      if not os.path.exists(file_path):
-        for f in os.listdir(DOWNLOAD_DIR):
-          if f.startswith(file_id):
-            final_filename = f
-            break
+      # İndirilen dosyayı bul
+      final_filename = None
+      for f in os.listdir(DOWNLOAD_DIR):
+        if f.startswith(file_id):
+          final_filename = f
+          break
+
+      if not final_filename:
+        raise HTTPException(
+            status_code=500, detail="Ses dosyası dizine kaydedilemedi."
+        )
 
       return {
           "status": "success",
