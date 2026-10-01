@@ -10,6 +10,13 @@ app = FastAPI(title="AudioSetter YouTube Engine")
 DOWNLOAD_DIR = "/tmp/downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# Render Environment içindeki YOUTUBE_COOKIES değerini geçici dosyaya yazma
+COOKIES_FILE = "/tmp/youtube_cookies.txt"
+cookie_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
+if cookie_content:
+  with open(COOKIES_FILE, "w", encoding="utf-8") as f:
+    f.write(cookie_content)
+
 
 class FetchRequest(BaseModel):
   url: str
@@ -24,27 +31,17 @@ def extract_audio(req: FetchRequest):
   file_id = str(uuid.uuid4())[:8]
   output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
 
-  # YouTube veri merkezi bot blokajını atlatan ios ve android_creator kombinasyonu
   ydl_opts = {
-      "format": "ba/b",
+      "format": "bestaudio/best",
       "outtmpl": output_template,
       "quiet": True,
       "no_warnings": True,
       "nocheckcertificate": True,
-      "extractor_args": {
-          "youtube": {
-              "player_client": ["android_creator", "ios"],
-          }
-      },
-      "http_headers": {
-          "User-Agent": (
-              "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)"
-              " AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4"
-              " Mobile/15E148 Safari/604.1"
-          ),
-          "Accept-Language": "en-US,en;q=0.9",
-      },
   }
+
+  # Eğer çerez dosyası mevcutsa yt-dlp'ye parametre olarak aktar
+  if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+    ydl_opts["cookiefile"] = COOKIES_FILE
 
   try:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
