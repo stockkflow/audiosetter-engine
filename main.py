@@ -10,81 +10,77 @@ app = FastAPI(title="AudioSetter YouTube Engine")
 DOWNLOAD_DIR = "/tmp/downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Render Environment içindeki YOUTUBE_COOKIES değerini geçici dosyaya yazma
 COOKIES_FILE = "/tmp/youtube_cookies.txt"
 cookie_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
 if cookie_content:
-  with open(COOKIES_FILE, "w", encoding="utf-8") as f:
-    f.write(cookie_content)
+    with open(COOKIES_FILE, "w", encoding="utf-8") as f:
+        f.write(cookie_content)
 
 
 class FetchRequest(BaseModel):
-  url: str
+    url: str
 
 
 @app.post("/extract-audio")
 def extract_audio(req: FetchRequest):
-  url = req.url.strip()
-  if not url:
-    raise HTTPException(status_code=400, detail="Geçersiz URL")
+    url = req.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Geçersiz URL")
 
-  file_id = str(uuid.uuid4())[:8]
-  output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
+    file_id = str(uuid.uuid4())[:8]
+    output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
 
-  ydl_opts = {
-      "format": "bestaudio/best",
-      "outtmpl": output_template,
-      "quiet": True,
-      "no_warnings": True,
-      "nocheckcertificate": True,
-  }
+    # Format kısıtını en esnek ve garantili hale getiriyoruz (ba: en iyi ses, bulamazsa b: en iyi video/ses)
+    ydl_opts = {
+        "format": "ba/b/best",
+        "outtmpl": output_template,
+        "quiet": True,
+        "no_warnings": True,
+        "nocheckcertificate": True,
+        "noplaylist": True,
+    }
 
-  # Eğer çerez dosyası mevcutsa yt-dlp'ye parametre olarak aktar
-  if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
-    ydl_opts["cookiefile"] = COOKIES_FILE
+    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+        ydl_opts["cookiefile"] = COOKIES_FILE
 
-  try:
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-      info = ydl.extract_info(url, download=True)
-      title = info.get("title", "AudioSetter Track")
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title", "AudioSetter Track")
 
-      final_filename = None
-      for f in os.listdir(DOWNLOAD_DIR):
-        if f.startswith(file_id):
-          final_filename = f
-          break
+            final_filename = None
+            for f in os.listdir(DOWNLOAD_DIR):
+                if f.startswith(file_id):
+                    final_filename = f
+                    break
 
-      if not final_filename:
-        raise HTTPException(
-            status_code=500, detail="Ses dosyası kaydedilemedi."
-        )
+            if not final_filename:
+                raise HTTPException(status_code=500, detail="Ses dosyası kaydedilemedi.")
 
-      return {
-          "status": "success",
-          "title": title,
-          "download_url": f"/download/{final_filename}",
-      }
-  except Exception as e:
-    raise HTTPException(
-        status_code=500, detail=f"YouTube ayıklama hatası: {str(e)}"
-    )
+            return {
+                "status": "success",
+                "title": title,
+                "download_url": f"/download/{final_filename}"
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"YouTube ayıklama hatası: {str(e)}")
 
 
 @app.get("/download/{filename}")
 def download_audio(filename: str):
-  file_path = os.path.join(DOWNLOAD_DIR, filename)
-  if not os.path.exists(file_path):
-    raise HTTPException(status_code=404, detail="Dosya bulunamadı")
-  return FileResponse(file_path, media_type="audio/mp4", filename=filename)
+    file_path = os.path.join(DOWNLOAD_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Dosya bulunamadı")
+    return FileResponse(file_path, media_type="audio/mp4", filename=filename)
 
 
-@app.get("/health")
+# UptimeRobot hem HEAD hem GET istekleri attığı için her iki metoda da izin veriyoruz
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
-  return {"status": "ok"}
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
-  import uvicorn
-
-  port = int(os.environ.get("PORT", 8000))
-  uvicorn.run(app, host="0.0.0.0", port=port)
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
