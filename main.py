@@ -1,36 +1,17 @@
 import os
 import uuid
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import yt_dlp
-import static_ffmpeg
-
-try:
-    static_ffmpeg.add_paths()
-except Exception as e:
-    print(f"FFmpeg yükleme uyarısı: {e}")
 
 app = FastAPI(title="AudioSetter YouTube Engine")
 
 DOWNLOAD_DIR = "/tmp/downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-COOKIES_FILE = "/tmp/youtube_cookies.txt"
-
-
-def setup_cookies():
-    cookie_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
-    if not cookie_content:
-        return None
-
-    cleaned_content = cookie_content.replace("\\n", "\n").replace("\\t", "\t")
-    with open(COOKIES_FILE, "w", encoding="utf-8") as f:
-        f.write(cleaned_content)
-    return COOKIES_FILE
-
-
-setup_cookies()
+# Güvenilir açık kaynak Cobalt API uç noktası
+COBALT_API_URL = "https://api.cobalt.tools"
 
 
 class FetchRequest(BaseModel):
@@ -38,64 +19,72 @@ class FetchRequest(BaseModel):
 
 
 @app.post("/extract-audio")
-def extract_audio(req: FetchRequest):
+async def extract_audio(req: FetchRequest):
     url = req.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="Geçersiz URL")
 
-    file_id = str(uuid.uuid4())[:8]
-    output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
-
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": output_template,
-        "quiet": False,
-        "no_warnings": False,
-        "nocheckcertificate": True,
-        "noplaylist": True,
-        "extractor_args": {
-            "youtube": {
-                # Çerezlerle (cookie) çalışan mobil web ve web istemcileri
-                "player_client": ["mweb", "web"],
-            }
-        },
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-            ),
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-        },
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "AudioSetter/1.0",
     }
 
-    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
-        ydl_opts["cookiefile"] = COOKIES_FILE
+    payload = {
+        "url": url,
+        "downloadMode": "audio",
+        "audioFormat": "mp3",
+    }
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = info.get("title", "AudioSetter Track")
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            # 1. Cobalt API'ye isteği gönder
+            response = await client.post(COBALT_API_URL, json=payload, headers=headers)
 
-            final_filename = None
-            for f in os.listdir(DOWNLOAD_DIR):
-                if f.startswith(file_id):
-                    final_filename = f
-                    break
-
-            if not final_filename:
+            if response.status_code != 200:
                 raise HTTPException(
-                    status_code=500, detail="Ses dosyası dizine kaydedilemedi."
+                    status_code=500,
+                    detail=f"Ses motoru yanıt vermedi: {response.text}",
                 )
+
+            data = response.json()
+            stream_url = data.get("url")
+            filename_header = data.get("filename", "AudioSetter_Track.mp3")
+
+            if not stream_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Ses akış adresi alınamadı.",
+                )
+
+            # 2. Sesi sunucunun geçici dizinine indir
+            file_id = str(uuid.uuid4())[:8]
+            final_filename = f"{file_id}.mp3"
+            file_path = os.path.join(DOWNLOAD_DIR, final_filename)
+
+            audio_res = await client.get(stream_url)
+            if audio_res.status_code == 200:
+                with open(file_path, "wb") as f:
+                    f.write(audio_res.content)
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Ses dosyası indirilemedi.",
+                )
+
+            track_title = filename_header.replace(".mp3", "")
 
             return {
                 "status": "success",
-                "title": title,
+                "title": track_title,
                 "download_url": f"/download/{final_filename}",
             }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Hata detayı: {e}")
         raise HTTPException(
-            status_code=500, detail=f"YouTube ayıklama hatası: {str(e)}"
+            status_code=500, detail=f"İndirme motoru hatası: {str(e)}"
         )
 
 
@@ -104,7 +93,7 @@ def download_audio(filename: str):
     file_path = os.path.join(DOWNLOAD_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Dosya bulunamadı")
-    return FileResponse(file_path, media_type="audio/mp4", filename=filename)
+    return FileResponse(file_path, media_type="audio/mpeg", filename=filename)
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
