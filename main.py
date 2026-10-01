@@ -24,24 +24,25 @@ def extract_audio(req: FetchRequest):
   file_id = str(uuid.uuid4())[:8]
   output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
 
-  # Hata veren player_skip kaldırıldı, en uyumlu mweb ve android istemcileri tanımlandı
+  # YouTube veri merkezi bot blokajını atlatan ios ve android_creator kombinasyonu
   ydl_opts = {
-      "format": "bestaudio/best",
+      "format": "ba/b",
       "outtmpl": output_template,
       "quiet": True,
       "no_warnings": True,
       "nocheckcertificate": True,
       "extractor_args": {
           "youtube": {
-              "player_client": ["mweb", "android"],
+              "player_client": ["android_creator", "ios"],
           }
       },
       "http_headers": {
           "User-Agent": (
-              "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML,"
-              " like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+              "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)"
+              " AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4"
+              " Mobile/15E148 Safari/604.1"
           ),
-          "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+          "Accept-Language": "en-US,en;q=0.9",
       },
   }
 
@@ -50,7 +51,6 @@ def extract_audio(req: FetchRequest):
       info = ydl.extract_info(url, download=True)
       title = info.get("title", "AudioSetter Track")
 
-      # İndirilen dosyayı bul
       final_filename = None
       for f in os.listdir(DOWNLOAD_DIR):
         if f.startswith(file_id):
@@ -59,7 +59,7 @@ def extract_audio(req: FetchRequest):
 
       if not final_filename:
         raise HTTPException(
-            status_code=500, detail="Ses dosyası dizine kaydedilemedi."
+            status_code=500, detail="Ses dosyası kaydedilemedi."
         )
 
       return {
